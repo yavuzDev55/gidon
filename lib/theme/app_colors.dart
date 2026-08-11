@@ -1,0 +1,24 @@
+import 'package:flutter/material.dart';
+
+/// Centralized brand colors for the app. Change a value here and it
+/// updates everywhere the color is used — never hardcode a color
+/// elsewhere in the app.
+class AppColors {
+  AppColors._();
+
+  static const Color yellow = Color(0xFFFACC15);
+  static const Color black = Color(0xFF121212);
+  static const Color secondaryBlack = Color(0xFF18181B);
+  static const Color white = Color(0xFFFAFAFA);
+
+  /// Used for "danger" actions only (discard ride, stop confirmation).
+  /// Kept separate from the brand palette so yellow can stay the sole
+  /// accent color for positive/primary actions.
+  static const Color danger = Color(0xFFE5484D);
+
+  /// Muted text color for secondary/less important labels, derived
+  /// from white/black at reduced opacity so it adapts automatically
+  /// if the base colors ever change.
+  static Color mutedOnDark = white.withValues(alpha: 0.6);
+  static Color mutedOnLight = black.withValues(alpha: 0.6);
+}
