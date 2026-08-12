@@ -66,7 +66,10 @@ class ScoreCalculator {
   static const double _accuracyLimitMeters = 15;
   static const double _noiseThresholdMeters = 3;
 
-  static ScoreEvaluationResult evaluate(List<GpsPoint> rawPoints) {
+  static ScoreEvaluationResult evaluate(
+    List<GpsPoint> rawPoints, {
+    double? elevationGainMetersOverride,
+  }) {
     final points = rawPoints
         .where((p) => p.accuracy <= _accuracyLimitMeters)
         .toList();
@@ -132,11 +135,9 @@ class ScoreCalculator {
       lastAcceptedPoint = current;
     }
 
-    double elevationGain = 0;
-    for (int i = 1; i < points.length; i++) {
-      final delta = points[i].altitude - points[i - 1].altitude;
-      if (delta > 0) elevationGain += delta;
-    }
+    final elevationGain =
+        elevationGainMetersOverride ??
+        RideStatsCalculator.totalElevationGainMeters(points);
     final elevationXp = (elevationGain / 10) * _xpPer10mElevation;
 
     final movingDurationMinutes = RideStatsCalculator.movingDuration(

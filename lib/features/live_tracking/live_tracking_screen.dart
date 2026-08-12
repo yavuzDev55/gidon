@@ -17,6 +17,7 @@ import 'ride_summary_screen.dart';
 import '../progression/progression_result_screen.dart';
 import '../map/geocoding_service.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
+import '../../services/location/terrain_elevation_service.dart';
 
 /// Hosts both the idle "browse the map, start a ride" UI and the
 /// active recording UI, switching between them based on whether a
@@ -130,7 +131,29 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
 
       if (rideId != null) {
         final points = await widget.isarService.getPointsForRide(rideId);
-        final summary = RideSummary.fromPoints(points);
+
+        // Attempt to fetch accurate terrain elevation for a more
+        // reliable climb reading than the phone's raw GPS altitude.
+        // Falls back silently to GPS-based elevation if this fails.
+        double? accurateElevationGain;
+        final sampledPoints = RideStatsCalculator.sampleRouteForElevation(
+          points,
+        );
+        if (sampledPoints.length >= 2) {
+          final elevations = await TerrainElevationService.fetchElevations(
+            sampledPoints.map((p) => LatLng(p.latitude, p.longitude)).toList(),
+          );
+          if (elevations != null) {
+            accurateElevationGain = RideStatsCalculator.elevationGainFromValues(
+              elevations,
+            );
+          }
+        }
+
+        final summary = RideSummary.fromPoints(
+          points,
+          elevationGainOverrideMeters: accurateElevationGain,
+        );
 
         const minDurationSeconds = 30;
         const minDistanceMeters = 250.0;
@@ -149,7 +172,10 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
           return;
         }
 
-        final scoreResult = ScoreCalculator.evaluate(points);
+        final scoreResult = ScoreCalculator.evaluate(
+          points,
+          elevationGainMetersOverride: accurateElevationGain,
+        );
 
         if (mounted) {
           Navigator.of(context).push(

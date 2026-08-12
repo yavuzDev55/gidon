@@ -142,6 +142,54 @@ class RideStatsCalculator {
     return gain;
   }
 
+  /// Picks a subset of points spaced roughly [intervalMeters] apart
+  /// along the route, to keep terrain elevation lookups efficient —
+  /// the public dataset itself is ~90m resolution, so querying more
+  /// densely than that adds no accuracy, only more network calls.
+  static List<GpsPoint> sampleRouteForElevation(
+    List<GpsPoint> rawPoints, {
+    double intervalMeters = 50,
+  }) {
+    final points = _filterAccuratePoints(rawPoints);
+    if (points.isEmpty) return [];
+
+    final sampled = <GpsPoint>[points.first];
+    GpsPoint lastSampled = points.first;
+
+    for (final point in points.skip(1)) {
+      if (distanceBetweenMeters(lastSampled, point) >= intervalMeters) {
+        sampled.add(point);
+        lastSampled = point;
+      }
+    }
+    if (sampled.last != points.last) sampled.add(points.last);
+    return sampled;
+  }
+
+  /// Same noise-threshold climb logic as [totalElevationGainMeters],
+  /// but operating on an externally supplied elevation list (e.g.
+  /// from a terrain elevation API) instead of raw GPS altitude.
+
+  static const double _elevationNoiseThresholdMeters = 3.0;
+
+  static double elevationGainFromValues(List<double> elevations) {
+    if (elevations.length < 2) return 0;
+
+    double gain = 0;
+    double reference = elevations.first;
+
+    for (final elevation in elevations.skip(1)) {
+      final delta = elevation - reference;
+      if (delta >= _elevationNoiseThresholdMeters) {
+        gain += delta;
+        reference = elevation;
+      } else if (delta <= -_elevationNoiseThresholdMeters) {
+        reference = elevation;
+      }
+    }
+    return gain;
+  }
+
   static double maxSpeedMetersPerSecond(List<GpsPoint> rawPoints) {
     final accuratePoints = _filterAccuratePoints(rawPoints);
     final points = filterMovingSegments(accuratePoints);
@@ -216,14 +264,19 @@ class RideSummary {
     required this.duration,
   });
 
-  factory RideSummary.fromPoints(List<GpsPoint> points) {
+  factory RideSummary.fromPoints(
+    List<GpsPoint> points, {
+    double? elevationGainOverrideMeters,
+  }) {
     if (points.isEmpty) {
-      return const RideSummary(
+      return RideSummary(
         pointCount: 0,
         totalDistanceMeters: 0,
         averageSpeedKmh: 0,
         maxSpeedKmh: 0,
-        elevationGainMeters: 0,
+        elevationGainMeters:
+            elevationGainOverrideMeters ??
+            RideStatsCalculator.totalElevationGainMeters(points),
         duration: Duration.zero,
       );
     }
