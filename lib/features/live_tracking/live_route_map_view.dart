@@ -5,38 +5,34 @@ import 'package:latlong2/latlong.dart';
 import '../../services/location/gps_point.dart';
 import '../../services/location/ride_stats_calculator.dart';
 
-/// Which map tile style is currently shown. Topographic shows
-/// elevation contour lines — useful for a cycling app.
-enum MapLayerStyle { standard, topographic }
+enum MapLayerStyle { cycling, terrain }
 
 /// Lets ancestor widgets (map control buttons, search bar) trigger
 /// actions on the map without needing direct access to flutter_map's
 /// own MapController.
-class MapController_ {
-  VoidCallback? _recenterCallback;
+class RideMapController {
+  VoidCallback? _recenterAndAlignCallback;
   void Function(LatLng position, {double? zoom})? _moveToCallback;
-  VoidCallback? _resetRotationCallback;
 
   void _attach({
-    required VoidCallback recenter,
+    required VoidCallback recenterAndAlign,
     required void Function(LatLng, {double? zoom}) moveTo,
-    required VoidCallback resetRotation,
   }) {
-    _recenterCallback = recenter;
+    _recenterAndAlignCallback = recenterAndAlign;
     _moveToCallback = moveTo;
-    _resetRotationCallback = resetRotation;
   }
 
   void _detach() {
-    _recenterCallback = null;
+    _recenterAndAlignCallback = null;
     _moveToCallback = null;
-    _resetRotationCallback = null;
   }
 
-  void recenter(LatLng? position) => _recenterCallback?.call();
+  /// Smoothly moves back to the current GPS position at the default
+  /// follow zoom, resets rotation to north, and resumes auto-follow.
+  void recenterAndAlign() => _recenterAndAlignCallback?.call();
+
   void moveTo(LatLng position, {double? zoom}) =>
       _moveToCallback?.call(position, zoom: zoom);
-  void resetRotation() => _resetRotationCallback?.call();
 }
 
 /// Renders the ride's route (or an idle map view when [points] is
@@ -45,7 +41,7 @@ class MapController_ {
 class LiveRouteMapView extends StatefulWidget {
   final List<GpsPoint> points;
   final LatLng? currentPosition;
-  final MapController_? controllerHolder;
+  final RideMapController? controllerHolder;
   final MapLayerStyle layerStyle;
   final LatLng? searchedLocation;
 
@@ -54,7 +50,7 @@ class LiveRouteMapView extends StatefulWidget {
     required this.points,
     required this.currentPosition,
     this.controllerHolder,
-    this.layerStyle = MapLayerStyle.standard,
+    this.layerStyle = MapLayerStyle.cycling,
     this.searchedLocation,
   });
 
@@ -62,38 +58,42 @@ class LiveRouteMapView extends StatefulWidget {
   State<LiveRouteMapView> createState() => _LiveRouteMapViewState();
 }
 
-class _LiveRouteMapViewState extends State<LiveRouteMapView> {
+class _LiveRouteMapViewState extends State<LiveRouteMapView>
+    with TickerProviderStateMixin {
   final MapController _mapController = MapController();
 
   bool _isFollowingUser = true;
   int _resumeFollowToken = 0;
   LatLng? _displayedPosition;
+  LatLng? _lastKnownCenter;
+  AnimationController? _moveAnimController;
 
   static const _minMovementMeters = 5.0;
+  static const _panGestureThresholdMeters = 3.0;
   static const _earthRadiusMeters = 6371000.0;
+  static const _defaultFollowZoom = 17.0;
   static const _resumeFollowDelay = Duration(seconds: 5);
 
   @override
   void initState() {
     super.initState();
     widget.controllerHolder?._attach(
-      recenter: () {
-        if (_displayedPosition != null) {
-          _mapController.move(_displayedPosition!, _mapController.camera.zoom);
-          setState(() => _isFollowingUser = true);
-        }
-      },
+      recenterAndAlign: _handleRecenterAndAlign,
       moveTo: (position, {zoom}) {
         setState(() => _isFollowingUser = false);
-        _mapController.move(position, zoom ?? _mapController.camera.zoom);
+        _animatedMapMove(
+          position,
+          zoom ?? _mapController.camera.zoom,
+          rotation: 0,
+        );
       },
-      resetRotation: () => _mapController.rotate(0),
     );
   }
 
   @override
   void dispose() {
     widget.controllerHolder?._detach();
+    _moveAnimController?.dispose();
     super.dispose();
   }
 
@@ -111,9 +111,66 @@ class _LiveRouteMapViewState extends State<LiveRouteMapView> {
     if (shouldAccept) {
       _displayedPosition = newPosition;
       if (_isFollowingUser) {
-        _mapController.move(newPosition, _mapController.camera.zoom);
+        // Keep whatever zoom the user currently has (e.g. if they
+        // pinch-zoomed while following), don't reset it.
+        _animatedMapMove(
+          newPosition,
+          _mapController.camera.zoom,
+          duration: const Duration(milliseconds: 900),
+        );
       }
     }
+  }
+
+  void _handleRecenterAndAlign() {
+    _resumeFollowToken++;
+    setState(() => _isFollowingUser = true);
+    final target = _displayedPosition ?? widget.currentPosition;
+    if (target != null) {
+      _animatedMapMove(target, _defaultFollowZoom, rotation: 0);
+    }
+  }
+
+  void _animatedMapMove(
+    LatLng destination,
+    double destZoom, {
+    double? rotation,
+    Duration duration = const Duration(milliseconds: 500),
+  }) {
+    _moveAnimController?.dispose();
+
+    final camera = _mapController.camera;
+    final latTween = Tween<double>(
+      begin: camera.center.latitude,
+      end: destination.latitude,
+    );
+    final lngTween = Tween<double>(
+      begin: camera.center.longitude,
+      end: destination.longitude,
+    );
+    final zoomTween = Tween<double>(begin: camera.zoom, end: destZoom);
+    final rotationTween = rotation == null
+        ? null
+        : Tween<double>(begin: camera.rotation, end: rotation);
+
+    final controller = AnimationController(vsync: this, duration: duration);
+    final animation = CurvedAnimation(
+      parent: controller,
+      curve: Curves.easeInOutCubic,
+    );
+    _moveAnimController = controller;
+
+    controller.addListener(() {
+      _mapController.move(
+        LatLng(latTween.evaluate(animation), lngTween.evaluate(animation)),
+        zoomTween.evaluate(animation),
+      );
+      if (rotationTween != null) {
+        _mapController.rotate(rotationTween.evaluate(animation));
+      }
+    });
+
+    controller.forward();
   }
 
   double _distanceMeters(LatLng a, LatLng b) {
@@ -129,10 +186,29 @@ class _LiveRouteMapViewState extends State<LiveRouteMapView> {
     return _earthRadiusMeters * c;
   }
 
+  /// Distinguishes a real pan/drag from a pinch-zoom that keeps the
+  /// center roughly in place. We track the center ourselves across
+  /// consecutive move events (flutter_map's MapEventMove doesn't
+  /// expose the "previous" center directly).
   void _onMapEvent(MapEvent event) {
-    final isUserGesture =
-        event is MapEventMove && event.source != MapEventSource.mapController;
-    if (isUserGesture) _pauseFollowingTemporarily();
+    if (event is! MapEventMove ||
+        event.source == MapEventSource.mapController) {
+      _lastKnownCenter = event.camera.center;
+      return;
+    }
+
+    final previousCenter = _lastKnownCenter;
+    _lastKnownCenter = event.camera.center;
+
+    if (previousCenter == null) return;
+
+    final moved = _distanceMeters(previousCenter, event.camera.center);
+    if (moved > _panGestureThresholdMeters) {
+      _pauseFollowingTemporarily();
+    }
+    // Otherwise: zoom-only gesture — following continues, and the
+    // next location update will simply keep using this new zoom
+    // level (see didUpdateWidget above).
   }
 
   void _pauseFollowingTemporarily() {
@@ -147,9 +223,13 @@ class _LiveRouteMapViewState extends State<LiveRouteMapView> {
 
   String get _tileUrlTemplate {
     switch (widget.layerStyle) {
-      case MapLayerStyle.standard:
-        return 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
-      case MapLayerStyle.topographic:
+      case MapLayerStyle.cycling:
+        // CyclOSM: shows bike lanes, cycle tracks, and road types
+        // relevant to cyclists.
+        return 'https://{s}.tile-cyclosm.openstreetmap.fr/cyclosm/{z}/{x}/{y}.png';
+      case MapLayerStyle.terrain:
+        // OpenTopoMap: elevation contours and terrain features, for
+        // seeing what's around you.
         return 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png';
     }
   }
@@ -170,13 +250,14 @@ class _LiveRouteMapViewState extends State<LiveRouteMapView> {
           mapController: _mapController,
           options: MapOptions(
             initialCenter: initialCenter,
-            initialZoom: 17,
+            initialZoom: _defaultFollowZoom,
             onMapEvent: _onMapEvent,
           ),
           children: [
             TileLayer(
               urlTemplate: _tileUrlTemplate,
               userAgentPackageName: 'com.gidon.app',
+              subdomains: const ['a', 'b', 'c'],
             ),
             if (routePoints.length >= 2)
               PolylineLayer(
@@ -220,18 +301,6 @@ class _LiveRouteMapViewState extends State<LiveRouteMapView> {
               ),
           ],
         ),
-        if (!_isFollowingUser && widget.currentPosition != null)
-          Positioned(
-            bottom: 12,
-            right: 12,
-            child: FloatingActionButton.small(
-              onPressed: () {
-                _resumeFollowToken++;
-                setState(() => _isFollowingUser = true);
-              },
-              child: const Icon(Icons.my_location),
-            ),
-          ),
       ],
     );
   }

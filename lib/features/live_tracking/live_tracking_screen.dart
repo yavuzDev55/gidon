@@ -13,7 +13,6 @@ import '../../theme/app_colors.dart';
 import '../map/map_controls_pill.dart';
 import 'live_route_map_view.dart';
 import 'recording_stop_control.dart';
-import 'ride_summary_screen.dart';
 import '../progression/progression_result_screen.dart';
 import '../map/geocoding_service.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
@@ -33,7 +32,7 @@ class LiveTrackingScreen extends StatefulWidget {
 
 class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
   final LocationStreamService _locationStreamService = LocationStreamService();
-  final MapController_ _mapControllerHolder = MapController_();
+  final RideMapController _mapControllerHolder = RideMapController();
 
   Position? _currentPosition;
   String? _errorMessage;
@@ -52,11 +51,16 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
   List<MultiplierInfo> _activeMultipliers = [];
   double _combinedMultiplier = 1;
 
-  MapLayerStyle _mapLayerStyle = MapLayerStyle.standard;
+  MapLayerStyle _mapLayerStyle = MapLayerStyle.cycling;
   LatLng? _searchedLocation;
   final TextEditingController _searchController = TextEditingController();
   List<GeocodingResult> _searchResults = [];
   bool _isSearching = false;
+
+  bool _isStatsExpanded = false;
+  double _elevationGainMeters = 0;
+  DateTime? _rideStartTime;
+  Duration _movingDuration = Duration.zero;
 
   @override
   void initState() {
@@ -85,6 +89,8 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
     final acceleration =
         RideStatsCalculator.currentAccelerationMetersPerSecondSquared(points);
     final multiplierStatus = ScoreCalculator.evaluate(points);
+    final elevationGain = RideStatsCalculator.totalElevationGainMeters(points);
+    final movingDuration = RideStatsCalculator.movingDuration(points);
 
     final isPaused =
         points.isNotEmpty &&
@@ -102,6 +108,11 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
         _activeMultipliers = multiplierStatus.currentActiveMultipliers;
         _combinedMultiplier = multiplierStatus.currentCombinedMultiplier;
         _isPaused = isPaused;
+        _elevationGainMeters = elevationGain;
+        _movingDuration = movingDuration;
+        if (points.isNotEmpty) {
+          _rideStartTime = points.first.timestamp.toLocal();
+        }
       });
     }
   }
@@ -127,6 +138,10 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
         _activeMultipliers = [];
         _combinedMultiplier = 1;
         _isPaused = false;
+        _elevationGainMeters = 0;
+        _rideStartTime = null;
+        _movingDuration = Duration.zero;
+        _isStatsExpanded = false;
       });
 
       if (rideId != null) {
@@ -250,9 +265,9 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
 
   void _toggleLayerStyle() {
     setState(() {
-      _mapLayerStyle = _mapLayerStyle == MapLayerStyle.standard
-          ? MapLayerStyle.topographic
-          : MapLayerStyle.standard;
+      _mapLayerStyle = _mapLayerStyle == MapLayerStyle.cycling
+          ? MapLayerStyle.terrain
+          : MapLayerStyle.cycling;
     });
   }
 
@@ -449,9 +464,9 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
               right: 16,
               bottom: 140,
               child: MapControlsPill(
-                onRecenter: () => _mapControllerHolder.recenter(currentLatLng),
+                onRecenterAndAlign: () =>
+                    _mapControllerHolder.recenterAndAlign(),
                 onToggleLayers: _toggleLayerStyle,
-                onToggleCompass: () => _mapControllerHolder.resetRotation(),
               ),
             ),
             Positioned(
@@ -503,9 +518,9 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
               right: 16,
               bottom: 100,
               child: MapControlsPill(
-                onRecenter: () => _mapControllerHolder.recenter(currentLatLng),
+                onRecenterAndAlign: () =>
+                    _mapControllerHolder.recenterAndAlign(),
                 onToggleLayers: _toggleLayerStyle,
-                onToggleCompass: () => _mapControllerHolder.resetRotation(),
               ),
             ),
             Positioned(
@@ -610,7 +625,24 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
               ),
             ],
           ),
-          const SizedBox(height: 12),
+          AnimatedSize(
+            duration: const Duration(milliseconds: 220),
+            curve: Curves.easeOut,
+            child: _isStatsExpanded
+                ? _buildExpandedStats()
+                : const SizedBox.shrink(),
+          ),
+          const SizedBox(height: 8),
+          GestureDetector(
+            onTap: () => setState(() => _isStatsExpanded = !_isStatsExpanded),
+            child: Icon(
+              _isStatsExpanded
+                  ? Icons.keyboard_arrow_up
+                  : Icons.keyboard_arrow_down,
+              color: Colors.white54,
+            ),
+          ),
+          const SizedBox(height: 4),
           Container(
             width: double.infinity,
             padding: const EdgeInsets.symmetric(vertical: 8),
@@ -632,6 +664,37 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
               ),
             ),
           ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildExpandedStats() {
+    final startTimeLabel = _rideStartTime == null
+        ? '--:--'
+        : '${_rideStartTime!.hour.toString().padLeft(2, '0')}:'
+              '${_rideStartTime!.minute.toString().padLeft(2, '0')}';
+
+    final movingHours = _movingDuration.inHours;
+    final movingMinutes = _movingDuration.inMinutes.remainder(60);
+    final movingSeconds = _movingDuration.inSeconds.remainder(60);
+    final movingTimeLabel =
+        '${movingHours.toString().padLeft(2, '0')}:'
+        '${movingMinutes.toString().padLeft(2, '0')}:'
+        '${movingSeconds.toString().padLeft(2, '0')}';
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 12),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          _StatLabel(
+            label: 'Elevation:',
+            value: _elevationGainMeters.toStringAsFixed(0),
+            unit: 'm',
+          ),
+          _StatLabel(label: 'Start:', value: startTimeLabel, unit: ''),
+          _StatLabel(label: 'Moving time:', value: movingTimeLabel, unit: ''),
         ],
       ),
     );

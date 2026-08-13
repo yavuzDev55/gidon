@@ -1,18 +1,15 @@
 import 'package:flutter/material.dart';
 import '../../theme/app_colors.dart';
 
-/// The vertical pill of map controls seen on the right edge of the
-/// map/recording screens: compass orientation, layer style toggle,
-/// and re-center-on-my-location.
+/// The vertical pill of map controls: layer style toggle, and a
+/// combined recenter+align-north action.
 class MapControlsPill extends StatelessWidget {
-  final VoidCallback onRecenter;
-  final VoidCallback? onToggleCompass;
+  final VoidCallback onRecenterAndAlign;
   final VoidCallback? onToggleLayers;
 
   const MapControlsPill({
     super.key,
-    required this.onRecenter,
-    this.onToggleCompass,
+    required this.onRecenterAndAlign,
     this.onToggleLayers,
   });
 
@@ -27,11 +24,9 @@ class MapControlsPill extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          _PillIcon(icon: Icons.explore_outlined, onTap: onToggleCompass),
-          const SizedBox(height: 4),
           _PillIcon(icon: Icons.layers_outlined, onTap: onToggleLayers),
           const SizedBox(height: 4),
-          _PillIcon(icon: Icons.navigation_outlined, onTap: onRecenter),
+          _PillIcon(icon: Icons.navigation_outlined, onTap: onRecenterAndAlign),
         ],
       ),
     );
