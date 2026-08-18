@@ -21,4 +21,9 @@ class AppColors {
   /// if the base colors ever change.
   static Color mutedOnDark = white.withValues(alpha: 0.6);
   static Color mutedOnLight = black.withValues(alpha: 0.6);
+
+  /// Used only for the route trail gradient — cycles smoothly between
+  /// these two, kept separate from the core brand palette.
+  static const Color routeTrailBlue = Color(0xFF2F6FED);
+  static const Color routeTrailGreen = Color(0xFF2ED9A3);
 }

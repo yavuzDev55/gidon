@@ -4,6 +4,7 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import '../../services/location/gps_point.dart';
 import '../../services/location/ride_stats_calculator.dart';
+import '../../services/location/route_polyline_builder.dart';
 
 enum MapLayerStyle { cycling, terrain }
 
@@ -27,8 +28,9 @@ class RideMapController {
     _moveToCallback = null;
   }
 
-  /// Smoothly moves back to the current GPS position at the default
-  /// follow zoom, resets rotation to north, and resumes auto-follow.
+  /// Smoothly moves back to the current GPS position, resets to
+  /// heading-up rotation (or north if not moving), resumes auto-follow,
+  /// and clears any manual rotation override.
   void recenterAndAlign() => _recenterAndAlignCallback?.call();
 
   void moveTo(LatLng position, {double? zoom}) =>
@@ -36,14 +38,24 @@ class RideMapController {
 }
 
 /// Renders the ride's route (or an idle map view when [points] is
-/// empty), auto-following the rider's position. Filters GPS jitter so
-/// the route/marker don't jump when stationary or the phone shakes.
+/// empty), auto-following the rider's position and, while following,
+/// auto-rotating to match the direction of travel ("heading up") and
+/// biasing the view ahead of the rider based on speed.
 class LiveRouteMapView extends StatefulWidget {
   final List<GpsPoint> points;
   final LatLng? currentPosition;
   final RideMapController? controllerHolder;
   final MapLayerStyle layerStyle;
   final LatLng? searchedLocation;
+
+  /// Compass heading in degrees (0-360, 0 = north), from the device's
+  /// GPS course-over-ground. Null or unreliable when stationary.
+  final double? headingDegrees;
+
+  /// Current speed in km/h — drives the look-ahead offset and gates
+  /// whether heading-based rotation is applied (ignored at very low
+  /// speed, where GPS heading is noisy).
+  final double? speedKmh;
 
   const LiveRouteMapView({
     super.key,
@@ -52,6 +64,8 @@ class LiveRouteMapView extends StatefulWidget {
     this.controllerHolder,
     this.layerStyle = MapLayerStyle.cycling,
     this.searchedLocation,
+    this.headingDegrees,
+    this.speedKmh,
   });
 
   @override
@@ -63,16 +77,25 @@ class _LiveRouteMapViewState extends State<LiveRouteMapView>
   final MapController _mapController = MapController();
 
   bool _isFollowingUser = true;
+  bool _manualRotationOverride = false;
   int _resumeFollowToken = 0;
   LatLng? _displayedPosition;
   LatLng? _lastKnownCenter;
+  double? _lastKnownRotationDeg;
   AnimationController? _moveAnimController;
 
   static const _minMovementMeters = 5.0;
   static const _panGestureThresholdMeters = 3.0;
+  static const _rotationGestureThresholdDeg = 3.0;
   static const _earthRadiusMeters = 6371000.0;
   static const _defaultFollowZoom = 17.0;
+  static const _headingActiveSpeedKmh = 3.0;
   static const _resumeFollowDelay = Duration(seconds: 5);
+
+  // Look-ahead tuning: at higher speed, the view center shifts ahead
+  // of the rider in the direction of travel, up to a capped distance.
+  static const _lookAheadSeconds = 5.0;
+  static const _maxLookAheadMeters = 150.0;
 
   @override
   void initState() {
@@ -104,31 +127,79 @@ class _LiveRouteMapViewState extends State<LiveRouteMapView>
     final newPosition = widget.currentPosition;
     if (newPosition == null) return;
 
-    final shouldAccept =
+    final isRealMovement =
         _displayedPosition == null ||
         _distanceMeters(_displayedPosition!, newPosition) >= _minMovementMeters;
 
-    if (shouldAccept) {
+    if (isRealMovement) {
       _displayedPosition = newPosition;
-      if (_isFollowingUser) {
-        // Keep whatever zoom the user currently has (e.g. if they
-        // pinch-zoomed while following), don't reset it.
-        _animatedMapMove(
-          newPosition,
-          _mapController.camera.zoom,
-          duration: const Duration(milliseconds: 900),
-        );
-      }
     }
+
+    if (_isFollowingUser && isRealMovement) {
+      final speedKmh = widget.speedKmh ?? 0;
+      final heading = widget.headingDegrees;
+
+      final targetCenter = _computeFollowTarget(newPosition, heading, speedKmh);
+
+      // Only touch rotation if we're allowed to (no manual override)
+      // and moving fast enough for heading to be trustworthy —
+      // otherwise leave whatever rotation the map currently has.
+      final targetRotation =
+          (!_manualRotationOverride &&
+              heading != null &&
+              speedKmh >= _headingActiveSpeedKmh)
+          ? -heading // NOTE: flip sign here to `heading` if the
+          // map appears to rotate the wrong way.
+          : null;
+
+      _animatedMapMove(
+        targetCenter,
+        _mapController.camera.zoom,
+        rotation: targetRotation,
+        duration: const Duration(milliseconds: 900),
+      );
+    }
+  }
+
+  /// Offsets [position] forward along [headingDegrees] by a distance
+  /// proportional to [speedKmh] (capped), so the visible map leans
+  /// into what's ahead rather than centering exactly on the rider.
+  LatLng _computeFollowTarget(
+    LatLng position,
+    double? headingDegrees,
+    double speedKmh,
+  ) {
+    if (headingDegrees == null) return position;
+
+    final speedMs = speedKmh / 3.6;
+    final lookAheadMeters = (speedMs * _lookAheadSeconds).clamp(
+      0.0,
+      _maxLookAheadMeters,
+    );
+
+    if (lookAheadMeters <= 0) return position;
+
+    return _destinationPoint(position, headingDegrees, lookAheadMeters);
   }
 
   void _handleRecenterAndAlign() {
     _resumeFollowToken++;
-    setState(() => _isFollowingUser = true);
+    setState(() {
+      _isFollowingUser = true;
+      _manualRotationOverride = false;
+    });
+
     final target = _displayedPosition ?? widget.currentPosition;
-    if (target != null) {
-      _animatedMapMove(target, _defaultFollowZoom, rotation: 0);
-    }
+    if (target == null) return;
+
+    final heading = widget.headingDegrees;
+    final speedKmh = widget.speedKmh ?? 0;
+    final rotation = (heading != null && speedKmh >= _headingActiveSpeedKmh)
+        ? -heading
+        : 0.0;
+    final followTarget = _computeFollowTarget(target, heading, speedKmh);
+
+    _animatedMapMove(followTarget, _defaultFollowZoom, rotation: rotation);
   }
 
   void _animatedMapMove(
@@ -149,9 +220,19 @@ class _LiveRouteMapViewState extends State<LiveRouteMapView>
       end: destination.longitude,
     );
     final zoomTween = Tween<double>(begin: camera.zoom, end: destZoom);
-    final rotationTween = rotation == null
-        ? null
-        : Tween<double>(begin: camera.rotation, end: rotation);
+
+    Tween<double>? rotationTween;
+    if (rotation != null) {
+      // Always animate through the SHORTEST angular path (e.g. 350°
+      // to 10° should turn forward through 0°, not backward through 180°).
+      var delta = (rotation - camera.rotation) % 360;
+      if (delta > 180) delta -= 360;
+      if (delta < -180) delta += 360;
+      rotationTween = Tween<double>(
+        begin: camera.rotation,
+        end: camera.rotation + delta,
+      );
+    }
 
     final controller = AnimationController(vsync: this, duration: duration);
     final animation = CurvedAnimation(
@@ -186,29 +267,60 @@ class _LiveRouteMapViewState extends State<LiveRouteMapView>
     return _earthRadiusMeters * c;
   }
 
-  /// Distinguishes a real pan/drag from a pinch-zoom that keeps the
-  /// center roughly in place. We track the center ourselves across
-  /// consecutive move events (flutter_map's MapEventMove doesn't
-  /// expose the "previous" center directly).
+  /// Standard "destination point given distance and bearing" formula.
+  LatLng _destinationPoint(
+    LatLng origin,
+    double bearingDegrees,
+    double distanceMeters,
+  ) {
+    final bearingRad = bearingDegrees * pi / 180;
+    final lat1 = origin.latitude * pi / 180;
+    final lon1 = origin.longitude * pi / 180;
+    final angularDistance = distanceMeters / _earthRadiusMeters;
+
+    final lat2 = asin(
+      sin(lat1) * cos(angularDistance) +
+          cos(lat1) * sin(angularDistance) * cos(bearingRad),
+    );
+    final lon2 =
+        lon1 +
+        atan2(
+          sin(bearingRad) * sin(angularDistance) * cos(lat1),
+          cos(angularDistance) - sin(lat1) * sin(lat2),
+        );
+
+    return LatLng(lat2 * 180 / pi, lon2 * 180 / pi);
+  }
+
+  /// Distinguishes pan (breaks position-following) from rotate
+  /// (breaks only auto-heading-rotation, following continues) — both
+  /// tracked independently since a single gesture could do either.
   void _onMapEvent(MapEvent event) {
     if (event is! MapEventMove ||
         event.source == MapEventSource.mapController) {
       _lastKnownCenter = event.camera.center;
+      _lastKnownRotationDeg = event.camera.rotation;
       return;
     }
 
     final previousCenter = _lastKnownCenter;
+    final previousRotation = _lastKnownRotationDeg;
     _lastKnownCenter = event.camera.center;
+    _lastKnownRotationDeg = event.camera.rotation;
 
-    if (previousCenter == null) return;
-
-    final moved = _distanceMeters(previousCenter, event.camera.center);
-    if (moved > _panGestureThresholdMeters) {
-      _pauseFollowingTemporarily();
+    if (previousCenter != null) {
+      final moved = _distanceMeters(previousCenter, event.camera.center);
+      if (moved > _panGestureThresholdMeters) {
+        _pauseFollowingTemporarily();
+      }
     }
-    // Otherwise: zoom-only gesture — following continues, and the
-    // next location update will simply keep using this new zoom
-    // level (see didUpdateWidget above).
+
+    if (previousRotation != null && !_manualRotationOverride) {
+      final rotationDelta = (event.camera.rotation - previousRotation).abs();
+      if (rotationDelta > _rotationGestureThresholdDeg) {
+        setState(() => _manualRotationOverride = true);
+      }
+    }
   }
 
   void _pauseFollowingTemporarily() {
@@ -224,12 +336,8 @@ class _LiveRouteMapViewState extends State<LiveRouteMapView>
   String get _tileUrlTemplate {
     switch (widget.layerStyle) {
       case MapLayerStyle.cycling:
-        // CyclOSM: shows bike lanes, cycle tracks, and road types
-        // relevant to cyclists.
         return 'https://{s}.tile-cyclosm.openstreetmap.fr/cyclosm/{z}/{x}/{y}.png';
       case MapLayerStyle.terrain:
-        // OpenTopoMap: elevation contours and terrain features, for
-        // seeing what's around you.
         return 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png';
     }
   }
@@ -259,15 +367,11 @@ class _LiveRouteMapViewState extends State<LiveRouteMapView>
               userAgentPackageName: 'com.gidon.app',
               subdomains: const ['a', 'b', 'c'],
             ),
-            if (routePoints.length >= 2)
+            if (filteredPoints.length >= 2)
               PolylineLayer(
-                polylines: [
-                  Polyline(
-                    points: routePoints,
-                    strokeWidth: 4,
-                    color: Colors.blue,
-                  ),
-                ],
+                polylines: RoutePolylineBuilder.buildFlowingGradientPolylines(
+                  filteredPoints,
+                ),
               ),
             if (_displayedPosition != null)
               MarkerLayer(

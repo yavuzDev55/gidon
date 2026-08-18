@@ -363,6 +363,8 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
               controllerHolder: _mapControllerHolder,
               layerStyle: _mapLayerStyle,
               searchedLocation: _searchedLocation,
+              headingDegrees: _currentPosition?.heading,
+              speedKmh: (_currentPosition?.speed ?? 0) * 3.6,
             ),
             Positioned(
               top: 12,
@@ -512,6 +514,8 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
               points: _recordedPoints,
               currentPosition: currentLatLng,
               controllerHolder: _mapControllerHolder,
+              headingDegrees: _currentPosition?.heading,
+              speedKmh: (_currentPosition?.speed ?? 0) * 3.6,
             ),
             Positioned(top: 12, left: 16, right: 16, child: _buildStatsPanel()),
             Positioned(

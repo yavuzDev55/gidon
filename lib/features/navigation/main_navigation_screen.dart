@@ -44,8 +44,6 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
           DraggableRadialNavMenu(
             selectedIndex: _selectedIndex,
             onSelect: (index) => setState(() => _selectedIndex = index),
-            topForbiddenHeight: _selectedIndex == _tabMap ? 230 : 0,
-            bottomObstacleHalfWidth: _selectedIndex == _tabMap ? 130 : 0,
           ),
         ],
       ),

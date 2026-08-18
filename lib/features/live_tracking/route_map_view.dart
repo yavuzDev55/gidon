@@ -3,6 +3,7 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import '../../services/location/gps_point.dart';
 import '../../services/location/ride_stats_calculator.dart';
+import '../../services/location/route_polyline_builder.dart';
 
 /// Renders a recorded ride's route as a line on an OpenStreetMap-based
 /// map, automatically centered and zoomed to fit the whole route.
@@ -37,9 +38,9 @@ class RouteMapView extends StatelessWidget {
           userAgentPackageName: 'com.gidon.app',
         ),
         PolylineLayer(
-          polylines: [
-            Polyline(points: routePoints, strokeWidth: 4, color: Colors.blue),
-          ],
+          polylines: RoutePolylineBuilder.buildFlowingGradientPolylines(
+            filteredPoints,
+          ),
         ),
         MarkerLayer(
           markers: [
