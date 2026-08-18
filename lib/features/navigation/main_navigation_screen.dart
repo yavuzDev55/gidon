@@ -3,12 +3,11 @@ import '../games/games_screen.dart';
 import '../live_tracking/live_tracking_screen.dart';
 import '../profile/profile_screen.dart';
 import '../../services/location/isar_service.dart';
-import 'radial_nav_menu.dart';
+import 'draggable_radial_nav_menu.dart';
 
 /// Root screen hosting the app's three main sections — Map/Ride,
-/// Profile, Games — behind a radial navigation menu. Only the Ride
-/// tab is kept alive across navigation (its active recording state
-/// must survive switching tabs).
+/// Profile, Games — behind a draggable radial navigation menu. Only
+/// the Ride tab is kept alive across navigation.
 class MainNavigationScreen extends StatefulWidget {
   final IsarService isarService;
 
@@ -42,13 +41,14 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
             ProfileScreen(isarService: widget.isarService),
           if (_selectedIndex == _tabGames)
             GamesScreen(isarService: widget.isarService),
+          DraggableRadialNavMenu(
+            selectedIndex: _selectedIndex,
+            onSelect: (index) => setState(() => _selectedIndex = index),
+            topForbiddenHeight: _selectedIndex == _tabMap ? 230 : 0,
+            bottomObstacleHalfWidth: _selectedIndex == _tabMap ? 130 : 0,
+          ),
         ],
       ),
-      floatingActionButton: RadialNavMenu(
-        selectedIndex: _selectedIndex,
-        onSelect: (index) => setState(() => _selectedIndex = index),
-      ),
-      floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
     );
   }
 }
