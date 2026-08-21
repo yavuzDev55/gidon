@@ -3,20 +3,20 @@ import 'package:flutter/material.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:wakelock_plus/wakelock_plus.dart';
 import '../../core/permissions/location_permission_handler.dart';
 import '../../services/location/gps_point.dart';
 import '../../services/location/isar_service.dart';
 import '../../services/location/location_stream_service.dart';
 import '../../services/location/ride_stats_calculator.dart';
+import '../../services/location/terrain_elevation_service.dart';
 import '../../services/scoring/score_calculator.dart';
 import '../../theme/app_colors.dart';
+import '../map/geocoding_service.dart';
 import '../map/map_controls_pill.dart';
+import '../progression/progression_result_screen.dart';
 import 'live_route_map_view.dart';
 import 'recording_stop_control.dart';
-import '../progression/progression_result_screen.dart';
-import '../map/geocoding_service.dart';
-import 'package:wakelock_plus/wakelock_plus.dart';
-import '../../services/location/terrain_elevation_service.dart';
 
 /// Hosts both the idle "browse the map, start a ride" UI and the
 /// active recording UI, switching between them based on whether a
@@ -51,16 +51,16 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
   List<MultiplierInfo> _activeMultipliers = [];
   double _combinedMultiplier = 1;
 
+  bool _isStatsExpanded = false;
+  double _elevationGainMeters = 0;
+  DateTime? _rideStartTime;
+  Duration _movingDuration = Duration.zero;
+
   MapLayerStyle _mapLayerStyle = MapLayerStyle.cycling;
   LatLng? _searchedLocation;
   final TextEditingController _searchController = TextEditingController();
   List<GeocodingResult> _searchResults = [];
   bool _isSearching = false;
-
-  bool _isStatsExpanded = false;
-  double _elevationGainMeters = 0;
-  DateTime? _rideStartTime;
-  Duration _movingDuration = Duration.zero;
 
   @override
   void initState() {
@@ -123,8 +123,8 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
     if (_isRideActive) {
       final rideId = _currentRideId;
       service.invoke('stopRide');
-      WakelockPlus.disable();
       _countRefreshTimer?.cancel();
+      await WakelockPlus.disable();
 
       setState(() {
         _isRideActive = false;
@@ -147,9 +147,6 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
       if (rideId != null) {
         final points = await widget.isarService.getPointsForRide(rideId);
 
-        // Attempt to fetch accurate terrain elevation for a more
-        // reliable climb reading than the phone's raw GPS altitude.
-        // Falls back silently to GPS-based elevation if this fails.
         double? accurateElevationGain;
         final sampledPoints = RideStatsCalculator.sampleRouteForElevation(
           points,
@@ -222,6 +219,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
       }
 
       service.invoke('startRide', {'rideId': rideId});
+      await WakelockPlus.enable();
 
       _countRefreshTimer = Timer.periodic(
         const Duration(seconds: 1),
@@ -233,8 +231,58 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
         _currentRideId = rideId;
         _recordedPointsCount = 0;
       });
+    }
+  }
 
-      WakelockPlus.enable();
+  Future<void> _showDiscardConfirmation() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Discard ride?'),
+        content: const Text(
+          'This will delete the recorded ride. This cannot be undone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Keep recording'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Discard'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      final rideId = _currentRideId;
+      final service = FlutterBackgroundService();
+      service.invoke('stopRide');
+      _countRefreshTimer?.cancel();
+      await WakelockPlus.disable();
+
+      if (rideId != null) {
+        await widget.isarService.deletePointsForRide(rideId);
+      }
+
+      setState(() {
+        _isRideActive = false;
+        _currentRideId = null;
+        _recordedPoints = [];
+        _recordedPointsCount = 0;
+        _totalDistanceMeters = 0;
+        _averageSpeedKmh = 0;
+        _maxSpeedKmh = 0;
+        _accelerationMs2 = 0;
+        _activeMultipliers = [];
+        _combinedMultiplier = 1;
+        _isPaused = false;
+        _elevationGainMeters = 0;
+        _rideStartTime = null;
+        _movingDuration = Duration.zero;
+        _isStatsExpanded = false;
+      });
     }
   }
 
@@ -265,58 +313,15 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
 
   void _toggleLayerStyle() {
     setState(() {
-      _mapLayerStyle = _mapLayerStyle == MapLayerStyle.cycling
-          ? MapLayerStyle.terrain
-          : MapLayerStyle.cycling;
-    });
-  }
-
-  Future<void> _showDiscardConfirmation() async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Discard ride?'),
-        content: const Text(
-          'This will delete the recorded ride. This cannot be undone.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Keep recording'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Discard'),
-          ),
-        ],
-      ),
-    );
-
-    if (confirmed == true) {
-      final rideId = _currentRideId;
-      final service = FlutterBackgroundService();
-      service.invoke('stopRide');
-      WakelockPlus.disable();
-      _countRefreshTimer?.cancel();
-
-      if (rideId != null) {
-        await widget.isarService.deletePointsForRide(rideId);
+      switch (_mapLayerStyle) {
+        case MapLayerStyle.cycling:
+          _mapLayerStyle = MapLayerStyle.terrain;
+        case MapLayerStyle.terrain:
+          _mapLayerStyle = MapLayerStyle.satellite;
+        case MapLayerStyle.satellite:
+          _mapLayerStyle = MapLayerStyle.cycling;
       }
-
-      setState(() {
-        _isRideActive = false;
-        _currentRideId = null;
-        _recordedPoints = [];
-        _recordedPointsCount = 0;
-        _totalDistanceMeters = 0;
-        _averageSpeedKmh = 0;
-        _maxSpeedKmh = 0;
-        _accelerationMs2 = 0;
-        _activeMultipliers = [];
-        _combinedMultiplier = 1;
-        _isPaused = false;
-      });
-    }
+    });
   }
 
   @override
@@ -345,8 +350,6 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
         : _buildIdleMapView(context);
   }
 
-  /// Idle state: full-screen map, search bar, and the prominent
-  /// yellow start button (bottom-right).
   Widget _buildIdleMapView(BuildContext context) {
     final currentLatLng = _currentPosition != null
         ? LatLng(_currentPosition!.latitude, _currentPosition!.longitude)
@@ -497,9 +500,6 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
     );
   }
 
-  /// Active recording state: stats panel, map, map controls, and the
-  /// expandable stop control (positioned above the always-on radial
-  /// nav menu, which lives independently in MainNavigationScreen).
   Widget _buildRecordingView(BuildContext context) {
     final currentLatLng = _currentPosition != null
         ? LatLng(_currentPosition!.latitude, _currentPosition!.longitude)
@@ -514,6 +514,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
               points: _recordedPoints,
               currentPosition: currentLatLng,
               controllerHolder: _mapControllerHolder,
+              layerStyle: _mapLayerStyle,
               headingDegrees: _currentPosition?.heading,
               speedKmh: (_currentPosition?.speed ?? 0) * 3.6,
             ),
@@ -528,7 +529,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
               ),
             ),
             Positioned(
-              bottom: 100,
+              bottom: 24,
               left: 0,
               right: 0,
               child: Center(

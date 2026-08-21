@@ -103,24 +103,32 @@ class IsarService {
       groupedByRide.putIfAbsent(point.rideId, () => []).add(point);
     }
 
-    final overviews = await Future.wait(
+    final overviewsWithNulls = await Future.wait(
       groupedByRide.entries.map((entry) async {
+        final meta = await getRideMeta(entry.key);
+        // A ride only "counts" once it has been explicitly saved
+        // (i.e. has a RideMeta record) — an in-progress ride's points
+        // are already being written to the DB (Black Box behavior),
+        // but shouldn't show up anywhere until the user saves it.
+        if (meta == null) return null;
+
         final points = entry.value
           ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
-        final meta = await getRideMeta(entry.key);
         final summary = RideSummary.fromPoints(points);
 
         return RideOverview(
           rideId: entry.key,
           startTime: points.first.timestamp,
           pointCount: points.length,
-          name: meta?.name,
+          name: meta.name,
           totalDistanceMeters: summary.totalDistanceMeters,
           averageSpeedKmh: summary.averageSpeedKmh,
           duration: summary.duration,
         );
       }),
     );
+
+    final overviews = overviewsWithNulls.whereType<RideOverview>().toList();
 
     switch (sortBy) {
       case RideSortOption.mostRecent:

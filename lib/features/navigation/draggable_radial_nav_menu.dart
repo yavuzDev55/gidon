@@ -25,8 +25,9 @@ class _DraggableRadialNavMenuState extends State<DraggableRadialNavMenu>
   static const double _edgeMargin = 4;
   static const double _circleSize = RadialNavMenu.centerButtonSize;
 
-  MenuEdge _edge = MenuEdge.right;
+  MenuEdge _edge = MenuEdge.left;
   double? _alongEdge;
+  bool _hasInitialized = false;
 
   Offset? _dragCenter;
   Offset? _dragStartCenter;
@@ -162,6 +163,8 @@ class _DraggableRadialNavMenuState extends State<DraggableRadialNavMenu>
       builder: (context, constraints) {
         final screenSize = Size(constraints.maxWidth, constraints.maxHeight);
         _alongEdge ??= screenSize.height - 200;
+        _edge = _hasInitialized ? _edge : MenuEdge.left;
+        _hasInitialized = true;
 
         final isTransient = _isDragging || _snapController.isAnimating;
 

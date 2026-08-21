@@ -6,7 +6,7 @@ import '../../services/location/gps_point.dart';
 import '../../services/location/ride_stats_calculator.dart';
 import '../../services/location/route_polyline_builder.dart';
 
-enum MapLayerStyle { cycling, terrain }
+enum MapLayerStyle { cycling, terrain, satellite }
 
 /// Lets ancestor widgets (map control buttons, search bar) trigger
 /// actions on the map without needing direct access to flutter_map's
@@ -339,6 +339,29 @@ class _LiveRouteMapViewState extends State<LiveRouteMapView>
         return 'https://{s}.tile-cyclosm.openstreetmap.fr/cyclosm/{z}/{x}/{y}.png';
       case MapLayerStyle.terrain:
         return 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png';
+      case MapLayerStyle.satellite:
+        return 'https://server.arcgisonline.com/ArcGIS/rest/services/'
+            'World_Imagery/MapServer/tile/{z}/{y}/{x}';
+    }
+  }
+
+  /// The highest zoom level each provider actually has tiles for.
+  /// Beyond this, flutter_map will stretch the last available tile
+  /// instead of requesting one that doesn't exist (which would
+  /// otherwise show blank or a "No data yet" placeholder image).
+  int get _maxNativeZoomForLayer {
+    switch (widget.layerStyle) {
+      case MapLayerStyle.cycling:
+        return 20;
+      case MapLayerStyle.terrain:
+        return 17;
+      case MapLayerStyle.satellite:
+        // Esri's actual coverage varies a lot by region — dense
+        // cities often have detail past 18, rural areas much less.
+        // 17 is a safe middle ground that avoids placeholder tiles
+        // in most populated areas; very remote areas may still hit
+        // Esri's own imagery limit before this (see note below).
+        return 17;
     }
   }
 
@@ -360,12 +383,18 @@ class _LiveRouteMapViewState extends State<LiveRouteMapView>
             initialCenter: initialCenter,
             initialZoom: _defaultFollowZoom,
             onMapEvent: _onMapEvent,
+            maxZoom: 19,
+            minZoom: 3,
           ),
           children: [
             TileLayer(
               urlTemplate: _tileUrlTemplate,
               userAgentPackageName: 'com.gidon.app',
-              subdomains: const ['a', 'b', 'c'],
+              subdomains: widget.layerStyle == MapLayerStyle.satellite
+                  ? const []
+                  : const ['a', 'b', 'c'],
+              maxNativeZoom: _maxNativeZoomForLayer,
+              maxZoom: 19,
             ),
             if (filteredPoints.length >= 2)
               PolylineLayer(
