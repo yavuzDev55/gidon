@@ -47,6 +47,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
   double _accelerationMs2 = 0;
   List<GpsPoint> _recordedPoints = [];
   bool _isPaused = false;
+  DateTime? _pauseStartedAt;
 
   List<MultiplierInfo> _activeMultipliers = [];
   double _combinedMultiplier = 1;
@@ -113,8 +114,25 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
         if (points.isNotEmpty) {
           _rideStartTime = points.first.timestamp.toLocal();
         }
+
+        // Track when the current pause started, purely for the
+        // separate "how long have I been paused" display — doesn't
+        // affect any other duration/distance stat.
+        if (isPaused) {
+          _pauseStartedAt ??= DateTime.now();
+        } else {
+          _pauseStartedAt = null;
+        }
       });
     }
+  }
+
+  String? get _pauseDurationLabel {
+    if (_pauseStartedAt == null) return null;
+    final elapsed = DateTime.now().difference(_pauseStartedAt!);
+    final minutes = elapsed.inMinutes;
+    final seconds = elapsed.inSeconds.remainder(60);
+    return '${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
   }
 
   void _toggleRide() async {
@@ -142,6 +160,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
         _rideStartTime = null;
         _movingDuration = Duration.zero;
         _isStatsExpanded = false;
+        _pauseStartedAt = null;
       });
 
       if (rideId != null) {
@@ -176,11 +195,6 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
 
         if (isTooShort) {
           await widget.isarService.deletePointsForRide(rideId);
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Ride too short — not saved.')),
-            );
-          }
           return;
         }
 
@@ -282,6 +296,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
         _rideStartTime = null;
         _movingDuration = Duration.zero;
         _isStatsExpanded = false;
+        _pauseStartedAt = null;
       });
     }
   }
@@ -569,9 +584,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
                     const SizedBox(height: 6),
                     _StatLabel(
                       label: 'Time:',
-                      value: _recordedPoints.isEmpty
-                          ? '0'
-                          : '${DateTime.now().difference(_recordedPoints.first.timestamp.toLocal()).inMinutes}',
+                      value: '${_movingDuration.inMinutes}',
                       unit: 'min',
                     ),
                   ],
@@ -658,7 +671,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
             child: Center(
               child: Text(
                 _isPaused
-                    ? 'Auto-Pause'
+                    ? 'Auto-Pause${_pauseDurationLabel != null ? ' • $_pauseDurationLabel' : ''}'
                     : _combinedMultiplier > 1
                     ? 'x${_combinedMultiplier.toStringAsFixed(0)} ${_activeMultipliers.map((m) => m.displayName).join(' + ')}'
                     : 'Recording',
