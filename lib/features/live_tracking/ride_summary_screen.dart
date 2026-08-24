@@ -15,6 +15,8 @@ import 'route_map_view.dart';
 ///
 /// When [isPendingConfirmation] is false, this is a historical,
 /// already-saved ride viewed read-only (from Profile/Ride History).
+/// In that mode the screen can be popped with `true` to signal that
+/// the ride was deleted, so the caller can refresh its list.
 class RideSummaryScreen extends StatefulWidget {
   final RideSummary summary;
   final List<GpsPoint> points;
@@ -133,6 +135,59 @@ class _RideSummaryScreenState extends State<RideSummaryScreen> {
     }
   }
 
+  /// Deletes an already-saved ride from history. Only removes this
+  /// ride's raw GPS points ([GpsPoint]) and its name/description
+  /// record ([RideMeta]) — the rider's aggregate progression
+  /// ([UserProfile]: xp, level, totalDistanceMeters, totalGold, etc.)
+  /// lives in a completely separate Isar collection that is written
+  /// once, at save time, and never references individual rides. So
+  /// deleting a ride from history cannot change those totals.
+  Future<void> _handleDeleteSavedRide() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: AppColors.yellow,
+        title: Text(
+          'Delete ride?',
+          style: AppTypography.heading(color: AppColors.black, fontSize: 20),
+        ),
+        content: Text(
+          'Your stats won\'t be affected.',
+          style: AppTypography.body(color: AppColors.black),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: Text(
+              'Cancel',
+              style: AppTypography.label(color: AppColors.black),
+            ),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: Text(
+              'Delete',
+              style: AppTypography.label(color: AppColors.danger),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    setState(() => _isProcessing = true);
+
+    await widget.isarService.deletePointsForRide(widget.rideId);
+    await widget.isarService.deleteRideMeta(widget.rideId);
+
+    if (mounted) {
+      // Returning `true` tells the caller (Profile / Ride History /
+      // All Rides) that a ride was deleted, so it can refresh its list.
+      Navigator.of(context).pop(true);
+    }
+  }
+
   String _defaultName() {
     final now = DateTime.now();
     return 'Ride ${now.day.toString().padLeft(2, '0')}/'
@@ -165,7 +220,9 @@ class _RideSummaryScreenState extends State<RideSummaryScreen> {
                           ),
                         )
                       : IconButton(
-                          onPressed: () => Navigator.of(context).pop(),
+                          onPressed: _isProcessing
+                              ? null
+                              : () => Navigator.of(context).pop(),
                           icon: const Icon(Icons.arrow_back),
                           style: IconButton.styleFrom(
                             backgroundColor: AppColors.black,
@@ -183,6 +240,19 @@ class _RideSummaryScreenState extends State<RideSummaryScreen> {
                       style: IconButton.styleFrom(
                         backgroundColor: AppColors.yellow,
                         foregroundColor: AppColors.black,
+                      ),
+                    ),
+                  )
+                else
+                  Positioned(
+                    top: 8,
+                    right: 8,
+                    child: IconButton(
+                      onPressed: _isProcessing ? null : _handleDeleteSavedRide,
+                      icon: const Icon(Icons.delete_outline),
+                      style: IconButton.styleFrom(
+                        backgroundColor: AppColors.danger,
+                        foregroundColor: AppColors.white,
                       ),
                     ),
                   ),

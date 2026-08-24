@@ -48,18 +48,25 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final points = await widget.isarService.getPointsForRide(rideId);
     final summary = RideSummary.fromPoints(points);
 
-    if (mounted) {
-      Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (_) => RideSummaryScreen(
-            summary: summary,
-            points: points,
-            isarService: widget.isarService,
-            rideId: rideId,
-            isPendingConfirmation: false,
-          ),
+    if (!mounted) return;
+
+    // `wasDeleted` is `true` if the summary screen deleted the ride
+    // (see RideSummaryScreen._handleDeleteSavedRide); the profile's
+    // lifetime stats aren't affected, only the ride list needs a refresh.
+    final wasDeleted = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => RideSummaryScreen(
+          summary: summary,
+          points: points,
+          isarService: widget.isarService,
+          rideId: rideId,
+          isPendingConfirmation: false,
         ),
-      );
+      ),
+    );
+
+    if (wasDeleted == true) {
+      await _refresh();
     }
   }
 
@@ -201,13 +208,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         GestureDetector(
-                          onTap: () => Navigator.of(context).push(
-                            MaterialPageRoute(
-                              builder: (_) => AllRidesScreen(
-                                isarService: widget.isarService,
+                          onTap: () async {
+                            await Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) => AllRidesScreen(
+                                  isarService: widget.isarService,
+                                ),
                               ),
-                            ),
-                          ),
+                            );
+                            // A ride may have been deleted from AllRidesScreen too.
+                            await _refresh();
+                          },
                           child: Row(
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [

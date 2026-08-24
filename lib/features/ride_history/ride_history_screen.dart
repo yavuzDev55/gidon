@@ -32,18 +32,24 @@ class _RideHistoryScreenState extends State<RideHistoryScreen> {
     final points = await widget.isarService.getPointsForRide(rideId);
     final summary = RideSummary.fromPoints(points);
 
-    if (mounted) {
-      Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (_) => RideSummaryScreen(
-            summary: summary,
-            points: points,
-            isarService: widget.isarService,
-            rideId: rideId,
-            isPendingConfirmation: false,
-          ),
+    if (!mounted) return;
+
+    // `wasDeleted` signals the ride was removed from history; the
+    // rider's lifetime stats are untouched, only this list is stale.
+    final wasDeleted = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => RideSummaryScreen(
+          summary: summary,
+          points: points,
+          isarService: widget.isarService,
+          rideId: rideId,
+          isPendingConfirmation: false,
         ),
-      );
+      ),
+    );
+
+    if (wasDeleted == true) {
+      await _refresh();
     }
   }
 
