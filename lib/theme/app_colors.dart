@@ -26,4 +26,8 @@ class AppColors {
   /// these two, kept separate from the core brand palette.
   static const Color routeTrailBlue = Color(0xFF2F6FED);
   static const Color routeTrailGreen = Color(0xFF2ED9A3);
+
+  /// Planned (not yet ridden) route overlay — distinct from the
+  /// recorded trail gradient.
+  static const Color plannedRoute = yellow;
 }

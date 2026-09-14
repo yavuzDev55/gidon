@@ -15,6 +15,8 @@ import '../../theme/app_colors.dart';
 import '../map/geocoding_service.dart';
 import '../map/map_controls_pill.dart';
 import '../progression/progression_result_screen.dart';
+import '../route_planner/route_planner_panel.dart';
+import '../../services/routing/route_plan_controller.dart';
 import 'live_route_map_view.dart';
 import 'recording_stop_control.dart';
 
@@ -33,6 +35,7 @@ class LiveTrackingScreen extends StatefulWidget {
 class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
   final LocationStreamService _locationStreamService = LocationStreamService();
   final RideMapController _mapControllerHolder = RideMapController();
+  late final RoutePlanController _routePlan;
 
   Position? _currentPosition;
   String? _errorMessage;
@@ -66,6 +69,10 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
   @override
   void initState() {
     super.initState();
+    _routePlan = RoutePlanController()
+      ..addListener(() {
+        if (mounted) setState(() {});
+      });
     _checkPermissions();
   }
 
@@ -74,7 +81,11 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
       await LocationPermissionHandler.ensurePermissions();
       _locationStreamService.start();
       _locationStreamService.positionStream.listen(
-        (position) => setState(() => _currentPosition = position),
+        (position) {
+          final latLng = LatLng(position.latitude, position.longitude);
+          _routePlan.onLocationUpdated(latLng);
+          setState(() => _currentPosition = position);
+        },
         onError: (error) => setState(() => _errorMessage = error.toString()),
       );
     } catch (error) {
@@ -322,6 +333,9 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
       _searchResults = [];
       _searchController.text = result.displayName;
     });
+    if (_routePlan.isPlanning) {
+      _routePlan.addWaypoint(result.position, label: result.displayName);
+    }
     _mapControllerHolder.moveTo(result.position, zoom: 15);
     FocusScope.of(context).unfocus();
   }
@@ -344,6 +358,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
     _countRefreshTimer?.cancel();
     _locationStreamService.dispose();
     _searchController.dispose();
+    _routePlan.dispose();
     super.dispose();
   }
 
@@ -383,6 +398,9 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
               searchedLocation: _searchedLocation,
               headingDegrees: _currentPosition?.heading,
               speedKmh: (_currentPosition?.speed ?? 0) * 3.6,
+              plannedPolyline: _routePlan.polyline,
+              plannedWaypoints: _routePlan.waypoints,
+              onMapTap: _routePlan.isPlanning ? _routePlan.addWaypoint : null,
             ),
             Positioned(
               top: 12,
@@ -487,6 +505,17 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
                 onRecenterAndAlign: () =>
                     _mapControllerHolder.recenterAndAlign(),
                 onToggleLayers: _toggleLayerStyle,
+                isPlanning: _routePlan.isPlanning,
+                onTogglePlanning: _routePlan.togglePlanning,
+              ),
+            ),
+            Positioned(
+              left: 16,
+              right: 100,
+              bottom: 24,
+              child: RoutePlannerPanel(
+                plan: _routePlan,
+                isarService: widget.isarService,
               ),
             ),
             Positioned(
@@ -532,6 +561,9 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
               layerStyle: _mapLayerStyle,
               headingDegrees: _currentPosition?.heading,
               speedKmh: (_currentPosition?.speed ?? 0) * 3.6,
+              plannedPolyline: _routePlan.polyline,
+              plannedWaypoints: _routePlan.waypoints,
+              onMapTap: _routePlan.isPlanning ? _routePlan.addWaypoint : null,
             ),
             Positioned(top: 12, left: 16, right: 16, child: _buildStatsPanel()),
             Positioned(
@@ -541,6 +573,18 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
                 onRecenterAndAlign: () =>
                     _mapControllerHolder.recenterAndAlign(),
                 onToggleLayers: _toggleLayerStyle,
+                isPlanning: _routePlan.isPlanning,
+                onTogglePlanning: _routePlan.togglePlanning,
+              ),
+            ),
+            Positioned(
+              left: 16,
+              right: 88,
+              bottom: 110,
+              child: RoutePlannerPanel(
+                plan: _routePlan,
+                isarService: widget.isarService,
+                compact: true,
               ),
             ),
             Positioned(

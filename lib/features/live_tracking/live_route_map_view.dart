@@ -5,6 +5,9 @@ import 'package:latlong2/latlong.dart';
 import '../../services/location/gps_point.dart';
 import '../../services/location/ride_stats_calculator.dart';
 import '../../services/location/route_polyline_builder.dart';
+import '../../services/routing/route_plan_logic.dart';
+import '../../services/routing/route_waypoint.dart';
+import '../../theme/app_colors.dart';
 
 enum MapLayerStyle { cycling, terrain, satellite }
 
@@ -47,6 +50,9 @@ class LiveRouteMapView extends StatefulWidget {
   final RideMapController? controllerHolder;
   final MapLayerStyle layerStyle;
   final LatLng? searchedLocation;
+  final List<LatLng> plannedPolyline;
+  final List<RouteWaypoint> plannedWaypoints;
+  final void Function(LatLng point)? onMapTap;
 
   /// Compass heading in degrees (0-360, 0 = north), from the device's
   /// GPS course-over-ground. Null or unreliable when stationary.
@@ -64,6 +70,9 @@ class LiveRouteMapView extends StatefulWidget {
     this.controllerHolder,
     this.layerStyle = MapLayerStyle.cycling,
     this.searchedLocation,
+    this.plannedPolyline = const [],
+    this.plannedWaypoints = const [],
+    this.onMapTap,
     this.headingDegrees,
     this.speedKmh,
   });
@@ -383,6 +392,9 @@ class _LiveRouteMapViewState extends State<LiveRouteMapView>
             initialCenter: initialCenter,
             initialZoom: _defaultFollowZoom,
             onMapEvent: _onMapEvent,
+            onTap: widget.onMapTap == null
+                ? null
+                : (tapPosition, point) => widget.onMapTap!(point),
             maxZoom: 19,
             minZoom: 3,
           ),
@@ -396,11 +408,43 @@ class _LiveRouteMapViewState extends State<LiveRouteMapView>
               maxNativeZoom: _maxNativeZoomForLayer,
               maxZoom: 19,
             ),
+            if (widget.plannedPolyline.length >= 2)
+              PolylineLayer(
+                polylines: [
+                  Polyline(
+                    points: widget.plannedPolyline,
+                    strokeWidth: 5,
+                    color: AppColors.plannedRoute.withValues(alpha: 0.9),
+                    borderStrokeWidth: 2,
+                    borderColor: AppColors.black,
+                  ),
+                ],
+              ),
             if (filteredPoints.length >= 2)
               PolylineLayer(
                 polylines: RoutePolylineBuilder.buildFlowingGradientPolylines(
                   filteredPoints,
                 ),
+              ),
+            if (widget.plannedWaypoints.isNotEmpty)
+              MarkerLayer(
+                markers: [
+                  for (var i = 0; i < widget.plannedWaypoints.length; i++)
+                    Marker(
+                      point: widget.plannedWaypoints[i].position,
+                      width: 32,
+                      height: 32,
+                      child: _WaypointMarker(
+                        number: i + 1,
+                        isNext:
+                            i ==
+                            RoutePlanLogic.nextIncompleteIndex(
+                              widget.plannedWaypoints,
+                            ),
+                        isCompleted: widget.plannedWaypoints[i].completed,
+                      ),
+                    ),
+                ],
               ),
             if (_displayedPosition != null)
               MarkerLayer(
@@ -441,4 +485,45 @@ class _LiveRouteMapViewState extends State<LiveRouteMapView>
 
 extension _FirstOrNull<T> on List<T> {
   T? get firstOrNull => isEmpty ? null : first;
+}
+
+class _WaypointMarker extends StatelessWidget {
+  final int number;
+  final bool isNext;
+  final bool isCompleted;
+
+  const _WaypointMarker({
+    required this.number,
+    required this.isNext,
+    required this.isCompleted,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final background = isCompleted
+        ? Colors.white54
+        : isNext
+        ? AppColors.yellow
+        : AppColors.black;
+    final foreground = isNext && !isCompleted
+        ? AppColors.black
+        : AppColors.white;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: background,
+        shape: BoxShape.circle,
+        border: Border.all(color: AppColors.white, width: 2),
+      ),
+      alignment: Alignment.center,
+      child: Text(
+        '$number',
+        style: TextStyle(
+          color: foreground,
+          fontSize: 12,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
+    );
+  }
 }

@@ -1,5 +1,8 @@
 import 'package:isar/isar.dart';
+import 'package:latlong2/latlong.dart';
 import 'package:path_provider/path_provider.dart';
+import '../routing/planned_route.dart';
+import '../routing/route_waypoint.dart';
 import '../scoring/user_profile.dart';
 import 'gps_point.dart';
 import 'ride_meta.dart';
@@ -40,6 +43,7 @@ class IsarService {
       GpsPointSchema,
       UserProfileSchema,
       RideMetaSchema,
+      PlannedRouteSchema,
     ], directory: directory.path);
   }
 
@@ -146,5 +150,59 @@ class IsarService {
     }
 
     return overviews;
+  }
+
+  Future<String> savePlannedRoute({
+    String? routeId,
+    required String name,
+    required List<RouteWaypoint> waypoints,
+    required List<LatLng> polyline,
+    required double distanceMeters,
+  }) async {
+    final id = routeId ?? DateTime.now().toUtc().toIso8601String();
+    final now = DateTime.now().toUtc();
+
+    await isar.writeTxn(() async {
+      final existing = await isar.plannedRoutes
+          .filter()
+          .routeIdEqualTo(id)
+          .findFirst();
+
+      final record = existing ?? PlannedRoute();
+      record.routeId = id;
+      record.createdAt = existing?.createdAt ?? now;
+      record.name = name;
+      record.updatedAt = now;
+      record.distanceMeters = distanceMeters;
+      record.waypoints = waypoints.map((waypoint) {
+        return PlannedWaypointEmbed()
+          ..waypointId = waypoint.id
+          ..latitude = waypoint.latitude
+          ..longitude = waypoint.longitude
+          ..label = waypoint.label;
+      }).toList();
+      record.polylineLatitudes = polyline
+          .map((point) => point.latitude)
+          .toList();
+      record.polylineLongitudes = polyline
+          .map((point) => point.longitude)
+          .toList();
+
+      await isar.plannedRoutes.put(record);
+    });
+
+    return id;
+  }
+
+  Future<List<PlannedRoute>> getAllPlannedRoutes() async {
+    final routes = await isar.plannedRoutes.where().findAll();
+    routes.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+    return routes;
+  }
+
+  Future<void> deletePlannedRoute(String routeId) async {
+    await isar.writeTxn(() async {
+      await isar.plannedRoutes.filter().routeIdEqualTo(routeId).deleteAll();
+    });
   }
 }
