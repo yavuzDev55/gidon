@@ -6,10 +6,10 @@ import 'package:flutter/material.dart';
 class AppColors {
   AppColors._();
 
-  static const Color yellow = Color(0xFFFACC15);
-  static const Color black = Color(0xFF121212);
-  static const Color secondaryBlack = Color(0xFF18181B);
-  static const Color white = Color(0xFFFAFAFA);
+  static const Color yellow = Color(0xFFDB9F15);
+  static const Color black = Color(0xFF111620);
+  static const Color secondaryBlack = Color(0xFF2C3541);
+  static const Color white = Color(0xFFFCFDFF);
 
   /// Used for "danger" actions only (discard ride, stop confirmation).
   /// Kept separate from the brand palette so yellow can stay the sole
