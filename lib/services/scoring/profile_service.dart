@@ -31,18 +31,32 @@ class ProfileService {
     return '${now.year}-${now.month.toString().padLeft(2, '0')}';
   }
 
+  /// Returns the profile, creating it on first use. If the stored XP
+  /// belongs to a previous month, it is reset here so every caller
+  /// (UI previews included) always sees the current month's XP.
   Future<UserProfile> getProfile() async {
+    final currentPeriod = currentMonthPeriod();
     final existing = await isar.userProfiles.get(_profileId);
-    if (existing != null) return existing;
 
-    final fresh = UserProfile()
-      ..id = _profileId
-      ..xpPeriod = currentMonthPeriod();
+    if (existing == null) {
+      final fresh = UserProfile()
+        ..id = _profileId
+        ..xpPeriod = currentPeriod;
+      await isar.writeTxn(() async {
+        await isar.userProfiles.put(fresh);
+      });
+      return fresh;
+    }
 
-    await isar.writeTxn(() async {
-      await isar.userProfiles.put(fresh);
-    });
-    return fresh;
+    if (existing.xpPeriod != currentPeriod) {
+      existing
+        ..xpPeriod = currentPeriod
+        ..xp = 0;
+      await isar.writeTxn(() async {
+        await isar.userProfiles.put(existing);
+      });
+    }
+    return existing;
   }
 
   /// Adds [xpToAdd] to a level/xp pair, rolling over into as many
@@ -74,13 +88,8 @@ class ProfileService {
     required double maxSpeedKmh,
     required double elevationGainMeters,
   }) async {
+    // getProfile() already handles the monthly XP reset.
     final profile = await getProfile();
-    final currentPeriod = currentMonthPeriod();
-
-    if (profile.xpPeriod != currentPeriod) {
-      profile.xpPeriod = currentPeriod;
-      profile.xp = 0;
-    }
 
     final progression = computeProgression(
       currentLevel: profile.level,
@@ -99,7 +108,6 @@ class ProfileService {
     if (maxSpeedKmh > profile.lifetimeMaxSpeedKmh) {
       profile.lifetimeMaxSpeedKmh = maxSpeedKmh;
     }
-
     profile.totalElevationGainMeters += elevationGainMeters;
 
     await isar.writeTxn(() async {

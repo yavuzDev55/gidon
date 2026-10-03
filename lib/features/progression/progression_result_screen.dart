@@ -48,23 +48,22 @@ class _ProgressionResultScreenState extends State<ProgressionResultScreen> {
   }
 
   Future<void> _playSequence() async {
-    if (!await _wait(500)) return;
-    setState(() => _phase = 1);
-    if (!await _wait(800)) return;
-    setState(() => _phase = 2);
-    if (!await _wait(800)) return;
-    setState(() => _phase = 3);
-    if (!await _wait(800)) return;
-    setState(() => _phase = 4);
+    const stepDelaysMs = [500, 800, 800, 800];
+
+    for (var i = 0; i < stepDelaysMs.length; i++) {
+      if (!await _wait(stepDelaysMs[i])) return;
+      if (!mounted) return;
+      setState(() => _phase = i + 1);
+    }
   }
 
   Future<bool> _wait(int ms) async {
     final stopwatch = Stopwatch()..start();
     while (stopwatch.elapsedMilliseconds < ms) {
-      if (_skipped) return false;
+      if (_skipped || !mounted) return false;
       await Future.delayed(const Duration(milliseconds: 30));
     }
-    return !_skipped;
+    return !_skipped && mounted;
   }
 
   void _skipToEnd() {

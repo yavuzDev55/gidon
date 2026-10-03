@@ -1,37 +1,60 @@
 # Gidon
 
-Gidon is a Flutter cycling companion focused on ride tracking, map-first recording, ride history, and lightweight progression mechanics.
+Gidon is a Flutter cycling app that makes ride tracking easy for
+non-professional riders and turns riding into a game for kids and
+game-motivated cyclists.
 
-The app currently targets a local-first mobile experience:
+## Features
 
-- Records GPS points during a ride, including background tracking on Android.
-- Shows live map position, route drawing, speed, distance, elevation, and moving time.
-- Filters noisy or inaccurate GPS points before computing ride statistics.
-- Lets riders save, name, review, and delete completed rides.
-- Applies XP, level, and gold rewards when a ride is confirmed.
-- Keeps profile totals separate from ride history deletion.
+- Map-first ride recording with live speed, distance, elevation, and
+  moving time
+- Android background tracking via a foreground service
+- Noise filtering and auto-pause for accurate ride statistics
+- Save, name, review, and delete rides (local-first, no account needed)
+- XP, levels, gold, and speed/consistency multipliers
+- Profile with lifetime stats and recent rides
+- Map layers (cycling, terrain, satellite) and place search
 
-## Project Map
+## Platform support
 
-Start with [CODEX.md](CODEX.md) before making changes. It explains the product goal, current boundaries, architecture, data model, scoring rules, and development guardrails for AI agents and human contributors.
+| Platform | Status |
+|----------|--------|
+| Android  | Supported (including background tracking) |
+| iOS      | Builds, background tracking not validated |
+| Others   | Flutter defaults only, not supported |
 
-## Main Folders
-
-- `lib/main.dart` initializes Isar, permissions, Android background tracking, and the root app.
-- `lib/features/` contains user-facing screens grouped by feature.
-- `lib/services/location/` contains GPS persistence, ride statistics, route filtering, and elevation lookup logic.
-- `lib/services/scoring/` contains XP, level, reward, and profile persistence logic.
-- `lib/theme/` contains shared colors and typography.
-- `test/` contains Flutter tests.
-
-## Development Commands
+## Getting started
 
 ```bash
 flutter pub get
 dart run build_runner build --delete-conflicting-outputs
-flutter analyze
-flutter test
 flutter run
 ```
 
-Run code generation after changing any Isar collection model.
+Run code generation again after changing any Isar `@collection` model.
+
+Useful checks:
+
+```bash
+flutter analyze
+flutter test
+```
+
+## Project structure
+
+- `lib/main.dart`: app entry point (Isar, permissions, background service)
+- `lib/features/`: screens grouped by feature
+- `lib/services/location/`: GPS persistence, ride stats, route filtering, elevation lookup
+- `lib/services/scoring/`: XP, levels, rewards, profile persistence
+- `lib/services/background/`: Android background tracking isolate
+- `lib/theme/`: shared colors and typography
+
+## Documentation
+
+- [CODEX.md](CODEX.md): project context, architecture, and rules
+- [AGENTS.md](AGENTS.md): instructions for AI coding agents
+- [docs/known-issues-and-roadmap.md](docs/known-issues-and-roadmap.md): known issues, next steps, release checklist
+
+## Status
+
+Development is currently paused. See the roadmap before resuming.

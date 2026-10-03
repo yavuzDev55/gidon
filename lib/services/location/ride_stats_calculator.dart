@@ -264,19 +264,24 @@ class RideSummary {
     required this.duration,
   });
 
+  /// Builds a summary from raw points. When [elevationGainOverrideMeters]
+  /// is provided (e.g. from a terrain elevation API), it takes priority
+  /// over the noisy GPS altitude readings.
   factory RideSummary.fromPoints(
     List<GpsPoint> points, {
     double? elevationGainOverrideMeters,
   }) {
+    final elevationGain =
+        elevationGainOverrideMeters ??
+        RideStatsCalculator.totalElevationGainMeters(points);
+
     if (points.isEmpty) {
       return RideSummary(
         pointCount: 0,
         totalDistanceMeters: 0,
         averageSpeedKmh: 0,
         maxSpeedKmh: 0,
-        elevationGainMeters:
-            elevationGainOverrideMeters ??
-            RideStatsCalculator.totalElevationGainMeters(points),
+        elevationGainMeters: elevationGain,
         duration: Duration.zero,
       );
     }
@@ -287,7 +292,7 @@ class RideSummary {
       averageSpeedKmh:
           RideStatsCalculator.averageSpeedMetersPerSecond(points) * 3.6,
       maxSpeedKmh: RideStatsCalculator.maxSpeedMetersPerSecond(points) * 3.6,
-      elevationGainMeters: RideStatsCalculator.totalElevationGainMeters(points),
+      elevationGainMeters: elevationGain,
       duration: RideStatsCalculator.movingDuration(points),
     );
   }
